@@ -1,0 +1,170 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>台灣計程車資估算器</title>
+
+<style>
+:root{
+  --p:#0078D4;
+  --p2:#005A9E;
+  --bg:#f4f7fb;
+  --line:#d8e0ea;
+  --muted:#627083;
+  --danger:#b42318;
+}
+*{box-sizing:border-box}
+body{
+  font-family:"Microsoft JhengHei","Noto Sans TC",sans-serif;
+  max-width:640px;
+  margin:auto;
+  padding:30px;
+  background:var(--bg);
+  color:#182230;
+}
+h2{color:var(--p);margin-top:0}
+.card{
+  background:#fff;
+  border:1px solid var(--line);
+  border-radius:10px;
+  padding:22px;
+  box-shadow:0 6px 18px rgba(32,51,84,.06);
+}
+label{display:block;font-size:13px;font-weight:700;color:#344054;margin:12px 0 5px}
+input{
+  width:100%;
+  padding:11px 12px;
+  border:1px solid var(--line);
+  border-radius:6px;
+  font:inherit;
+}
+input:focus{outline:3px solid rgba(0,120,212,.15);border-color:var(--p)}
+button{
+  width:100%;
+  margin-top:18px;
+  padding:12px 24px;
+  background:var(--p);
+  color:#fff;
+  border:none;
+  border-radius:6px;
+  cursor:pointer;
+  font:inherit;
+  font-weight:700;
+}
+button:hover{background:var(--p2)}
+button:disabled{opacity:.6;cursor:not-allowed}
+#result{
+  margin-top:20px;
+  padding:16px;
+  background:#f2f8ff;
+  border-radius:8px;
+  font-size:18px;
+  line-height:1.8;
+}
+#result.error{background:#fdecea;color:var(--danger);font-size:15px}
+.note{font-size:12px;color:var(--muted);margin-top:14px;line-height:1.6}
+</style>
+</head>
+
+<body>
+
+<div class="card">
+<h2>🚕 台灣計程車資估算器</h2>
+
+<label for="origin">起點</label>
+<input type="text" id="origin" placeholder="起點，例如：亞東醫院">
+
+<label for="destination">終點</label>
+<input type="text" id="destination" placeholder="終點，例如：遠東通訊園區">
+
+<button onclick="calculateFare()" id="calcBtn">計算車資</button>
+
+<div id="result"></div>
+
+<div class="note">車資依台北市牌價估算（起跳 NT$85／1.25 公里內，續程每 200 公尺加收 NT$5），僅供參考，實際車資請以車內計費表為準。</div>
+</div>
+
+<script>
+
+const subscriptionKey = 'ATZ8wlWbteVO7HMhgiSFYGW9GFIsEgTuJTTxar8DD1B0hCN7DceVJQQJ99CHACYeBjFoWU01AAAgAZMP4Osp';
+
+async function geocode(address){
+  const url = `https://atlas.microsoft.com/search/address/json?api-version=1.0&subscription-key=${subscriptionKey}&query=${encodeURIComponent(address)}`;
+  const response = await fetch(url);
+  if(!response.ok){
+    throw new Error(`地址查詢失敗（HTTP ${response.status}），請確認 API Key 是否有效`);
+  }
+  const data = await response.json();
+  if(!data.results || data.results.length===0){
+    throw new Error("找不到地址：" + address);
+  }
+  return data.results[0].position;
+}
+
+async function getRoute(start,end){
+  const url = `https://atlas.microsoft.com/route/directions/json?api-version=1.0&subscription-key=${subscriptionKey}&query=${start.lat},${start.lon}:${end.lat},${end.lon}`;
+  const response = await fetch(url);
+  if(!response.ok){
+    throw new Error(`路線查詢失敗（HTTP ${response.status}），請確認 API Key 是否有效`);
+  }
+  const data = await response.json();
+  if(!data.routes || data.routes.length===0){
+    throw new Error("無法規劃兩地間的行車路線");
+  }
+  return data.routes[0].summary;
+}
+
+function calculateTaxiFare(distanceKm){
+  let fare = 85;
+  if(distanceKm > 1.25){
+    let extraMeters = (distanceKm - 1.25) * 1000;
+    fare += Math.ceil(extraMeters / 200) * 5;
+  }
+  return fare;
+}
+
+async function calculateFare(){
+  const resultEl = document.getElementById("result");
+  const btn = document.getElementById("calcBtn");
+  resultEl.className = "";
+
+  try{
+    const origin = document.getElementById("origin").value.trim();
+    const destination = document.getElementById("destination").value.trim();
+
+    if(!origin || !destination){
+      resultEl.className = "error";
+      resultEl.innerHTML = "❌ 請輸入起點與終點";
+      return;
+    }
+
+    btn.disabled = true;
+    resultEl.innerHTML = "計算中...";
+
+    const start = await geocode(origin);
+    const end = await geocode(destination);
+    const route = await getRoute(start,end);
+
+    const distanceKm = route.lengthInMeters / 1000;
+    const durationMin = Math.round(route.travelTimeInSeconds / 60);
+    const fare = calculateTaxiFare(distanceKm);
+
+    resultEl.innerHTML = `
+      📍 距離：${distanceKm.toFixed(1)} 公里<br>
+      ⏱️ 預估時間：${durationMin} 分鐘<br>
+      🚕 預估車資：<b>NT$ ${fare}</b>
+    `;
+
+  }catch(ex){
+    resultEl.className = "error";
+    resultEl.innerHTML = "❌ " + ex.message;
+  }finally{
+    btn.disabled = false;
+  }
+}
+
+</script>
+
+</body>
+</html>
