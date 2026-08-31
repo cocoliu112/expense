@@ -1,0 +1,342 @@
+<!DOCTYPE html>
+<html lang="zh-TW">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>台灣計程車資估算器</title>
+
+<style>
+:root{
+  --p:#0078D4;
+  --p2:#005A9E;
+  --bg:#f4f7fb;
+  --line:#d8e0ea;
+  --muted:#627083;
+  --danger:#b42318;
+}
+*{box-sizing:border-box}
+body{
+  font-family:"Microsoft JhengHei","Noto Sans TC",sans-serif;
+  max-width:640px;
+  margin:auto;
+  padding:30px;
+  background:var(--bg);
+  color:#182230;
+}
+h2{color:var(--p);margin-top:0}
+.card{
+  background:#fff;
+  border:1px solid var(--line);
+  border-radius:10px;
+  padding:22px;
+  box-shadow:0 6px 18px rgba(32,51,84,.06);
+}
+label{display:block;font-size:13px;font-weight:700;color:#344054;margin:12px 0 5px}
+input{
+  width:100%;
+  padding:11px 12px;
+  border:1px solid var(--line);
+  border-radius:6px;
+  font:inherit;
+}
+input:focus{outline:3px solid rgba(0,120,212,.15);border-color:var(--p)}
+button{
+  width:100%;
+  margin-top:18px;
+  padding:12px 24px;
+  background:var(--p);
+  color:#fff;
+  border:none;
+  border-radius:6px;
+  cursor:pointer;
+  font:inherit;
+  font-weight:700;
+}
+button:hover{background:var(--p2)}
+button:disabled{opacity:.6;cursor:not-allowed}
+#result{
+  margin-top:20px;
+  padding:16px;
+  background:#f2f8ff;
+  border-radius:8px;
+  font-size:18px;
+  line-height:1.8;
+}
+#result.error{background:#fdecea;color:var(--danger);font-size:14px}
+.note{font-size:12px;color:var(--muted);margin-top:14px;line-height:1.6}
+
+.search-row{display:flex;gap:10px}
+.search-row input{flex:1}
+.search-row button{
+  width:auto;
+  margin-top:0;
+  white-space:nowrap;
+  padding:11px 20px;
+}
+#searchResults{margin-top:14px;display:flex;flex-direction:column;gap:8px}
+.result-item{
+  display:flex;
+  justify-content:space-between;
+  align-items:center;
+  gap:10px;
+  padding:10px 12px;
+  border:1px solid var(--line);
+  border-radius:8px;
+  background:#fafcff;
+}
+.result-item .info{flex:1;min-width:0}
+.result-item .info .name{font-weight:700;color:#182230;font-size:14px}
+.result-item .info .addr{font-size:12px;color:var(--muted);margin-top:2px;word-break:break-all}
+.result-item .btns{display:flex;gap:6px;flex-shrink:0}
+.result-item .btns button{
+  width:auto;
+  margin-top:0;
+  padding:6px 10px;
+  font-size:12px;
+  font-weight:700;
+}
+.result-item .btns .set-origin{background:#eaf3fb;color:#005A9E}
+.result-item .btns .set-origin:hover{background:#d9ecfb}
+.result-item .btns .set-dest{background:#eafaf0;color:#137333}
+.result-item .btns .set-dest:hover{background:#d7f3e3}
+.search-hint{font-size:12px;color:var(--muted);margin-top:8px}
+</style>
+</head>
+
+<body>
+
+<div class="card">
+<h2>📍 地址搜尋器</h2>
+<div class="search-row">
+  <input type="text" id="placeQuery" placeholder="輸入地名、建築名稱，例如：亞東醫院、遠東通訊園區" onkeydown="if(event.key==='Enter'){event.preventDefault();searchPlace();}">
+  <button onclick="searchPlace()" id="searchBtn">搜尋</button>
+</div>
+<div class="search-hint">搜尋後可直接將結果一鍵設為下方的起點或終點。</div>
+<div id="searchResults"></div>
+</div>
+
+<div class="card" style="margin-top:20px">
+<h2>🚕 台灣計程車資估算器</h2>
+
+<label for="origin">起點</label>
+<input type="text" id="origin" placeholder="起點，例如：亞東醫院">
+
+<label for="destination">終點</label>
+<input type="text" id="destination" placeholder="終點，例如：遠東通訊園區">
+
+<button onclick="calculateFare()" id="calcBtn">計算車資</button>
+
+<div id="result"></div>
+
+<div class="note">車資會依比對到的起點縣市套用日間基礎里程費率；低速費依需求以預估行車時間 40% 計算，每滿 60 秒加收 NT$5。未納入夜間、春節、機場、國道通行費等加成，實際仍以車內計費表為準。</div>
+</div>
+
+<script>
+
+const subscriptionKey = 'ATZ8wlWbteVO7HMhgiSFYGW9GFIsEgTuJTTxar8DD1B0hCN7DceVJQQJ99CHACYeBjFoWU01AAAgAZMP4Osp';
+
+function escHtml(s){
+  return String(s ?? '').replace(/[&<>"']/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]));
+}
+
+// 地址／地標搜尋（使用 Fuzzy Search，同時支援地名、建築物、POI 與一般地址）
+
+function normalizeTaiwanText(s){
+  return String(s || '').replace(/臺/g,'台').replace(/\s+/g,'');
+}
+function isCompleteTaiwanAddress(r){
+  const a = r && r.address ? r.address : {};
+  const full = normalizeTaiwanText(a.freeformAddress || '');
+  const city = normalizeTaiwanText(a.municipality || a.countrySubdivision || '');
+  const district = normalizeTaiwanText(a.municipalitySubdivision || a.localName || '');
+  const street = normalizeTaiwanText(a.streetName || '');
+  const number = normalizeTaiwanText(a.streetNumber || '');
+  const hasCity = !!city || /(縣|市)/.test(full);
+  const hasDistrict = !!district || /(區|鄉|鎮|市)/.test(full);
+  const hasStreet = !!street || /(路|街|大道|公路|巷|弄)/.test(full);
+  const hasNumber = !!number || /\d+(之\d+)?號/.test(full);
+  return hasCity && hasDistrict && hasStreet && hasNumber;
+}
+
+// 日間一般計程車估算參數。跨縣市時依起點縣市計算。
+const TAXI_RATES = {
+  '台北市':{base:85,baseMeters:1250,stepMeters:200,stepFare:5},
+  '新北市':{base:85,baseMeters:1250,stepMeters:200,stepFare:5},
+  '基隆市':{base:85,baseMeters:1250,stepMeters:200,stepFare:5},
+  '桃園市':{base:95,baseMeters:1250,stepMeters:200,stepFare:5},
+  '新竹市':{base:100,baseMeters:1250,stepMeters:200,stepFare:5},
+  '新竹縣':{base:100,baseMeters:1250,stepMeters:200,stepFare:5},
+  '苗栗縣':{base:100,baseMeters:1250,stepMeters:200,stepFare:5},
+  '台中市':{base:85,baseMeters:1250,stepMeters:200,stepFare:5},
+  '彰化縣':{base:100,baseMeters:1500,stepMeters:200,stepFare:5},
+  '南投縣':{base:85,baseMeters:1500,stepMeters:200,stepFare:5},
+  '雲林縣':{base:100,baseMeters:1250,stepMeters:220,stepFare:5},
+  '嘉義市':{base:100,baseMeters:1250,stepMeters:220,stepFare:5},
+  '嘉義縣':{base:100,baseMeters:1250,stepMeters:220,stepFare:5},
+  '台南市':{base:85,baseMeters:1250,stepMeters:200,stepFare:5},
+  '高雄市':{base:85,baseMeters:1250,stepMeters:200,stepFare:5},
+  '屏東縣':{base:100,baseMeters:1000,stepMeters:200,stepFare:5},
+  '宜蘭縣':{base:120,baseMeters:1500,stepMeters:200,stepFare:5},
+  '花蓮縣':{base:100,baseMeters:1000,stepMeters:230,stepFare:5},
+  '台東縣':{base:100,baseMeters:1000,stepMeters:230,stepFare:5},
+  '澎湖縣':{base:100,baseMeters:1000,stepMeters:250,stepFare:5},
+  '金門縣':{base:100,baseMeters:1000,stepMeters:250,stepFare:5},
+  '連江縣':{base:100,baseMeters:1000,stepMeters:250,stepFare:5}
+};
+function detectCounty(address){
+  const s=normalizeTaiwanText(address);
+  return Object.keys(TAXI_RATES).find(k=>s.includes(k)) || '台北市';
+}
+
+async function searchPlace(){
+  const query = document.getElementById("placeQuery").value.trim();
+  const resultsEl = document.getElementById("searchResults");
+  const btn = document.getElementById("searchBtn");
+
+  if(!query){
+    resultsEl.innerHTML = '<div class="search-hint" style="color:var(--danger)">請輸入要搜尋的地名或建築名稱</div>';
+    return;
+  }
+
+  btn.disabled = true;
+  resultsEl.innerHTML = '<div class="search-hint">搜尋中...</div>';
+
+  try{
+    const url = `https://atlas.microsoft.com/search/fuzzy/json?api-version=1.0&subscription-key=${subscriptionKey}&countrySet=TW&language=zh-TW&lat=25.0478&lon=121.5319&limit=5&query=${encodeURIComponent(query)}`;
+    const response = await fetch(url);
+    const data = await response.json();
+
+    if(!response.ok){
+      const apiMsg = data && data.error && data.error.message ? data.error.message : '';
+      throw new Error(`搜尋失敗（HTTP ${response.status}）${apiMsg ? '：' + apiMsg : '，請確認 API Key 是否有效'}`);
+    }
+
+    const filteredResults = (data.results || []).filter(isCompleteTaiwanAddress);
+    if(filteredResults.length===0){
+      resultsEl.innerHTML = '<div class="search-hint" style="color:var(--danger)">❌ 找不到符合的地點，請嘗試更完整的名稱或地址</div>';
+      return;
+    }
+
+    resultsEl.innerHTML = filteredResults.map((r,i) => {
+      const name = r.poi && r.poi.name ? r.poi.name : (r.address ? r.address.freeformAddress : query);
+      const addr = r.address ? r.address.freeformAddress : '';
+      return `
+        <div class="result-item">
+          <div class="info">
+            <div class="name">${escHtml(name)}</div>
+            <div class="addr">${escHtml(addr)}</div>
+          </div>
+          <div class="btns">
+            <button class="set-origin" onclick="applyResult(${i},'origin')">設為起點</button>
+            <button class="set-dest" onclick="applyResult(${i},'destination')">設為終點</button>
+          </div>
+        </div>`;
+    }).join('');
+
+    window._lastSearchResults = filteredResults;
+
+  }catch(ex){
+    resultsEl.innerHTML = `<div class="search-hint" style="color:var(--danger)">❌ ${escHtml(ex.message)}</div>`;
+  }finally{
+    btn.disabled = false;
+  }
+}
+
+function applyResult(index, field){
+  const r = window._lastSearchResults && window._lastSearchResults[index];
+  if(!r) return;
+  const addr = r.address ? r.address.freeformAddress : '';
+  document.getElementById(field).value = addr;
+}
+
+async function geocode(address){
+  // countrySet=TW 將搜尋範圍限制在台灣，避免同名地址被比對到國外或錯誤地區
+  // lat/lon 加上台北市中心作為偏好中心點，進一步提高在地地址的比對準確度
+  const url = `https://atlas.microsoft.com/search/address/json?api-version=1.0&subscription-key=${subscriptionKey}&countrySet=TW&language=zh-TW&lat=25.0478&lon=121.5319&limit=1&query=${encodeURIComponent(address)}`;
+  const response = await fetch(url);
+  const data = await response.json();
+  if(!response.ok){
+    const apiMsg = data && data.error && data.error.message ? data.error.message : '';
+    throw new Error(`地址查詢失敗（HTTP ${response.status}）${apiMsg ? '：' + apiMsg : '，請確認 API Key 是否有效'}`);
+  }
+  const filteredResults = (data.results || []).filter(isCompleteTaiwanAddress);
+    if(filteredResults.length===0){
+    throw new Error("找不到地址：" + address);
+  }
+  const top = data.results[0];
+  return { ...top.position, matchedAddress: top.address ? top.address.freeformAddress : address, address: top.address || {} };
+}
+
+async function getRoute(start,end){
+  const url = `https://atlas.microsoft.com/route/directions/json?api-version=1.0&subscription-key=${subscriptionKey}&query=${start.lat},${start.lon}:${end.lat},${end.lon}`;
+  const response = await fetch(url);
+  const data = await response.json();
+  if(!response.ok){
+    const apiMsg = data && data.error && data.error.message ? data.error.message : '';
+    throw new Error(`路線查詢失敗（HTTP ${response.status}）${apiMsg ? '：' + apiMsg : '，請確認 API Key 是否有效'}`);
+  }
+  if(!data.routes || data.routes.length===0){
+    throw new Error("無法規劃兩地間的行車路線");
+  }
+  return data.routes[0].summary;
+}
+
+function calculateTaxiFare(distanceMeters, travelTimeSeconds, county){
+  const rate = TAXI_RATES[county] || TAXI_RATES['台北市'];
+  const distanceFare = rate.base + Math.max(0, Math.ceil((distanceMeters-rate.baseMeters)/rate.stepMeters))*rate.stepFare;
+  // 依需求：以預估行車時間的 40% 作為低速時間，每滿 60 秒加 5 元。
+  const lowSpeedSeconds = travelTimeSeconds * 0.40;
+  const lowSpeedFare = Math.floor(lowSpeedSeconds / 60) * 5;
+  return Math.ceil((distanceFare+lowSpeedFare)/5)*5;
+}
+async function calculateFare(){
+  const resultEl = document.getElementById("result");
+  const btn = document.getElementById("calcBtn");
+  resultEl.className = "";
+
+  try{
+    const origin = document.getElementById("origin").value.trim();
+    const destination = document.getElementById("destination").value.trim();
+
+    if(!origin || !destination){
+      resultEl.className = "error";
+      resultEl.innerHTML = "❌ 請輸入起點與終點";
+      return;
+    }
+
+    btn.disabled = true;
+    resultEl.className = "";
+    resultEl.innerHTML = "計算中...";
+
+    const start = await geocode(origin);
+    const end = await geocode(destination);
+    const route = await getRoute(start,end);
+
+    const distanceKm = route.lengthInMeters / 1000;
+    const durationMin = Math.round(route.travelTimeInSeconds / 60);
+    const county = detectCounty(start.matchedAddress);
+    const fare = calculateTaxiFare(route.lengthInMeters, route.travelTimeInSeconds, county);
+
+    resultEl.className = "";
+    resultEl.innerHTML = `
+      📍 距離：${distanceKm.toFixed(1)} 公里<br>
+      ⏱️ 預估時間：${durationMin} 分鐘<br>
+      🚕 預估車資：<b style="font-size:26px;color:#D83B01">NT$ ${fare}</b><br>
+      <span style="font-size:12px;color:#627083">
+        比對到的起點：${start.matchedAddress}<br>
+        比對到的終點：${end.matchedAddress}
+      </span>
+    `;
+
+  }catch(ex){
+    resultEl.className = "error";
+    resultEl.innerHTML = "❌ " + ex.message;
+  }finally{
+    btn.disabled = false;
+  }
+}
+
+</script>
+
+</body>
+</html>
