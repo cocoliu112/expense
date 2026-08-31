@@ -302,7 +302,7 @@ function calculateTaxiFare(distanceMeters, travelTimeSeconds, county){
   const rate = TAXI_RATES[county] || TAXI_RATES['台北市'];
   const distanceFare = rate.base + Math.max(0, Math.ceil((distanceMeters-rate.baseMeters)/rate.stepMeters))*rate.stepFare;
   // 依需求：以預估行車時間的 25% 作為低速時間，每滿 60 秒加 5 元。
-  const lowSpeedSeconds = travelTimeSeconds * 0.25;
+  const lowSpeedSeconds = travelTimeSeconds * 0.3;
   const lowSpeedFare = Math.floor(lowSpeedSeconds / 60) * 5;
   return Math.ceil((distanceFare+lowSpeedFare)/5)*5;
 }
