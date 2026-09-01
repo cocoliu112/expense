@@ -128,7 +128,7 @@ button:disabled{opacity:.6;cursor:not-allowed}
 
 <div id="result"></div>
 
-<div class="note">車資會依比對到的起點縣市套用日間基礎里程費率；低速費依需求以預估行車時間 25% 計算，每滿 60 秒加收 NT$5。未納入夜間、春節、機場、國道通行費等加成，實際仍以車內計費表為準。</div>
+<div class="note">車資會依比對到的起點縣市套用日間基礎里程費率；低速費依需求以預估行車時間 30% 計算，每滿 60 秒加收 NT$5。未納入夜間、春節、機場、國道通行費等加成，實際仍以車內計費表為準。</div>
 </div>
 
 <script>
@@ -301,7 +301,7 @@ async function getRoute(start,end){
 function calculateTaxiFare(distanceMeters, travelTimeSeconds, county){
   const rate = TAXI_RATES[county] || TAXI_RATES['台北市'];
   const distanceFare = rate.base + Math.max(0, Math.ceil((distanceMeters-rate.baseMeters)/rate.stepMeters))*rate.stepFare;
-  // 依需求：以預估行車時間的 25% 作為低速時間，每滿 60 秒加 5 元。
+  // 依需求：以預估行車時間的 30% 作為低速時間，每滿 60 秒加 5 元。
   const lowSpeedSeconds = travelTimeSeconds * 0.3;
   const lowSpeedFare = Math.floor(lowSpeedSeconds / 60) * 5;
   return Math.ceil((distanceFare+lowSpeedFare)/5)*5;
